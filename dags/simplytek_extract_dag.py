@@ -1,8 +1,10 @@
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import boto3
 import requests
 from bs4 import BeautifulSoup
 from airflow.decorators import dag, task
@@ -146,8 +148,22 @@ def simplytek_extract_pipeline():
         )
         return file_path
 
-    raw_file = scrape_catalog()
-    validate_raw_output(raw_file)
+    @task()
+    def upload_to_s3(file_path: str, ds: str = None) -> str:
+        bucket = os.environ["S3_BUCKET_NAME"]
+        endpoint_url = os.environ.get("S3_ENDPOINT_URL") or None
+        file_name = Path(file_path).name
+        s3_key = f"bronze/simplytek/scraped_date={ds}/{file_name}"
 
+        s3 = boto3.client("s3", endpoint_url=endpoint_url)
+        s3.upload_file(file_path, bucket, s3_key)
+
+        s3_uri = f"s3://{bucket}/{s3_key}"
+        print(f"Uploaded Bronze snapshot -> {s3_uri}")
+        return s3_uri
+
+    raw_file = scrape_catalog()
+    validated_file = validate_raw_output(raw_file)
+    upload_to_s3(validated_file)
 
 simplytek_extract_pipeline()
